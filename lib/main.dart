@@ -1,104 +1,102 @@
-import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
+
+
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:testingbloc_course/bloc/bloc_actions.dart';
-import 'package:testingbloc_course/bloc/person.dart';
-import 'dart:developer' as devtools show log;
+import 'package:testingbloc_course/apis/login_api.dart';
+import 'package:testingbloc_course/apis/notes_api.dart';
+import 'package:testingbloc_course/bloc/actions.dart';
+import 'package:testingbloc_course/bloc/app_bloc.dart';
+import 'package:testingbloc_course/dialogs/generic_dialog.dart';
+import 'package:testingbloc_course/dialogs/loading_screen.dart';
+import 'package:testingbloc_course/models.dart';
+import 'package:testingbloc_course/string.dart';
+import 'package:testingbloc_course/views/iterable_list_view.dart';
+import 'package:testingbloc_course/views/login_view.dart';
 
-import 'package:testingbloc_course/bloc/persons_bloc.dart';
+import 'bloc/app_state.dart';
 
-extension Log on Object {
-  void log() => devtools.log(toString());
-}
+
 
 void main() {
-  runApp(MaterialApp(
-    theme: ThemeData(primarySwatch: Colors.blue),
-    debugShowCheckedModeBanner: false,
-    home: BlocProvider(
-      create: (_) => PersonsBloc(),
-      child: const HomePage(),
+  runApp(
+    MaterialApp(
+      title: 'Flutter Demo',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+      ),
+      debugShowCheckedModeBanner: false,
+      home: const HomePage(),
     ),
-  ));
-}
-
-Future<Iterable<Person>> getPersons(String url) => HttpClient()
-    .getUrl(Uri.parse(url))
-    .then((req) => req.close())
-    .then((resp) => resp.transform(utf8.decoder).join())
-    .then((str) => json.decode(str))
-    .then((list) => (list as List<dynamic>).map((e) => Person.fromJson(e)));
-
-extension Subscript<T> on Iterable<T> {
-  T? operator [](int index) => length > index ? elementAt(index) : null;
+  );
 }
 
 class HomePage extends StatelessWidget {
-  const HomePage({Key? key}) : super(key: key);
+  const HomePage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Home Page'),
+    return BlocProvider(
+      create: (context) => AppBloc(
+        loginApi: LoginApi(),
+        notesApi: NotesApi(),
       ),
-      body: Column(
-        children: [
-          Row(
-            children: [
-              TextButton(
-                onPressed: () {
-                  context.read<PersonsBloc>().add(
-                        const LoadPersonsAction(
-                          url: persons1Url,
-                          loader: getPersons,
-                        ),
-                      );
-                },
-                child: const Text(
-                  'Load json #1',
-                ),
-              ),
-              TextButton(
-                onPressed: () {
-                  context.read<PersonsBloc>().add(
-                        const LoadPersonsAction(
-                          url: persons2Url,
-                          loader: getPersons,
-                        ),
-                      );
-                },
-                child: const Text(
-                  'Load json #2',
-                ),
-              ),
-            ],
-          ),
-          BlocBuilder<PersonsBloc, FetchResult?>(
-            buildWhen: (previousResult, currentResult) {
-              return previousResult?.persons != currentResult?.persons;
-            },
-            builder: ((context, fetchResult) {
-              fetchResult?.log();
-              final persons = fetchResult?.persons;
-              if (persons == null) {
-                return const SizedBox();
-              }
-              return Expanded(
-                child: ListView.builder(
-                  itemCount: persons.length,
-                  itemBuilder: (context, index) {
-                    final person = persons[index]!;
-                    return ListTile(
-                      title: Text(person.name),
-                    );
-                  },
-                ),
+      child: Scaffold(
+        
+        appBar: AppBar(
+          centerTitle: true,
+          title: const Text(homepage),
+        ),
+        body: BlocConsumer<AppBloc, AppState>(
+          listener: (context, appstate) {
+            // Loading Screen
+            if (appstate.isLoding) {
+              LoadingScreen.instance().show(
+                context: context,
+                text: pleaseWait,
               );
-            }),
-          ),
-        ],
+            } else {
+              LoadingScreen.instance().hide();
+            }
+
+            //? display possible errors
+            final loginErrors = appstate.loginErrors;
+            if (loginErrors != null) {
+              showGenericDialog<bool>(
+                context: context,
+                title: loginErrorDialogTitle,
+                content: loginErrorDialogContent,
+                optionBuilder: () => {ok: true},
+              );
+            }
+
+            //! if we are logged in, but we have no fetched notes, fetch them row
+            if (appstate.isLoding == false &&
+                appstate.loginErrors == null &&
+                appstate.loginHandle == const LoginHandle.fooBar() &&
+                appstate.fetchedNotes == null) {
+              context.read<AppBloc>().add(
+                    const LoadNotesAction(),
+                  );
+            }
+          },
+          builder: (context, appstate) {
+            final notes = appstate.fetchedNotes;
+            if (notes == null) {
+              return LoginView(
+                onLoginTapped: (email, password) {
+                  context.read<AppBloc>().add(
+                        LoginAction(
+                          email: email,
+                          password: password,
+                        ),
+                      );
+                },
+              );
+            } else {
+              return notes.toListView();
+            }
+          },
+        ),
       ),
     );
   }
